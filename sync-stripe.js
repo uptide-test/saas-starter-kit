@@ -73,6 +73,8 @@ function cleanup(prisma) {
 
 function getStripeInstance() {
   if (process.env.STRIPE_SECRET_KEY) {
+    // Pinned on purpose: this script only lists products and prices. Review the
+    // API changelog before moving it to a newer version.
     const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '', {
       apiVersion: '2022-11-15',
     });
