@@ -1,5 +1,5 @@
 import Stripe from 'stripe';
-import { stripe } from '@/lib/stripe';
+import { stripe, subscriptionPeriod } from '@/lib/stripe';
 import type { NextApiRequest, NextApiResponse } from 'next';
 import env from '@/lib/env';
 import type { Readable } from 'node:stream';
@@ -78,15 +78,10 @@ export default async function POST(req: NextApiRequest, res: NextApiResponse) {
 }
 
 async function handleSubscriptionUpdated(event: Stripe.Event) {
-  const {
-    cancel_at,
-    id,
-    status,
-    current_period_end,
-    current_period_start,
-    customer,
-    items,
-  } = event.data.object as Stripe.Subscription;
+  const sub = event.data.object as Stripe.Subscription;
+  const { cancel_at, id, status, customer, items } = sub;
+  // Endpoints on older API versions still send the period on the subscription.
+  const period = subscriptionPeriod(sub);
 
   const subscription = await getBySubscriptionId(id);
   if (!subscription) {
@@ -101,12 +96,8 @@ async function handleSubscriptionUpdated(event: Stripe.Event) {
     //type Stripe.Subscription.Status = "active" | "canceled" | "incomplete" | "incomplete_expired" | "past_due" | "paused" | "trialing" | "unpaid"
     await updateStripeSubscription(id, {
       active: status === 'active',
-      endDate: current_period_end
-        ? new Date(current_period_end * 1000)
-        : undefined,
-      startDate: current_period_start
-        ? new Date(current_period_start * 1000)
-        : undefined,
+      endDate: period ? new Date(period.end * 1000) : undefined,
+      startDate: period ? new Date(period.start * 1000) : undefined,
       cancelAt: cancel_at ? new Date(cancel_at * 1000) : undefined,
       priceId,
     });
@@ -114,16 +105,20 @@ async function handleSubscriptionUpdated(event: Stripe.Event) {
 }
 
 async function handleSubscriptionCreated(event: Stripe.Event) {
-  const { customer, id, current_period_start, current_period_end, items } =
-    event.data.object as Stripe.Subscription;
+  const sub = event.data.object as Stripe.Subscription;
+  const { customer, id, items } = sub;
+  const period = subscriptionPeriod(sub);
+  if (!period) {
+    throw new Error(`Subscription ${id} has no billing period`);
+  }
 
   await createStripeSubscription({
     customerId: customer as string,
     id,
 
     active: true,
-    startDate: new Date(current_period_start * 1000),
-    endDate: new Date(current_period_end * 1000),
+    startDate: new Date(period.start * 1000),
+    endDate: new Date(period.end * 1000),
     priceId: items.data.length > 0 ? items.data[0].plan?.id : '',
   });
 }
